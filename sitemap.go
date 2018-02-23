@@ -38,7 +38,7 @@ func main() {
 		log.Errorf("error writing file: %S", err.Error())
 	}
 
-	log.Infof("crawl took: %s. wrote %d urls", time.Since(crawl.start), crawl.urlsWritten)
+	log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 }
 
 func stopOnSigKill(stop chan bool) {

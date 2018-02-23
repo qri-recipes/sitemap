@@ -23,6 +23,8 @@ type Config struct {
 	// StopAfterEntries kills the crawler after a specified number of urls have been visited
 	// default of 0 don't limit the number of entries
 	StopAfterEntries int
+	// StopUrl will stop the crawler after crawling a given URL
+	StopURL string
 	// Polite is weather or not to respect robots.txt
 	Polite bool
 	// SrcPath is the path to an input site file from a previous crawl
@@ -33,8 +35,12 @@ type Config struct {
 	RecordResponseHeaders bool
 	// StaleDuration
 	StaleDurationHours int
-	// BatchWriteInterval configures how often to stop & write a batch backup
-	BatchWriteInterval int
+	// BackupWriteInterval configures how often to stop & write a backup of current progress
+	BackupWriteInterval int
+	// UnfetchedScanFreqMilliseconds sets how often the crawler should scan the list of fetched
+	// urls, checking links for unfetched urls. this "rehydrates" the crawler with urls that
+	// might be missed while avoiding duplicate fetching. default value of 0 disables the check
+	UnfetchedScanFreqMilliseconds int
 }
 
 // DefaultConfig returns the default configuration

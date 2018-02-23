@@ -10,19 +10,21 @@ import (
 	"github.com/PuerkitoBio/fetchbot"
 )
 
+const queueBufferSize = 5000
+
 // Crawl holds state of a general crawl, including any number of
 // "fetchbots", set by config.Parallism
 type Crawl struct {
 	// time crawler started
 	start time.Time
 
-	// internal channel to publish stop on
-	stop chan bool
+	// flag indicating crawler is stopping
+	stopping bool
 
 	// domains is a list of domains to fetch from
 	domains []*url.URL
 
-	// confoguration settings
+	// cfg embeds this crawl's configuration
 	cfg Config
 
 	// crawlers is a slice of all the executing crawlers
@@ -62,7 +64,7 @@ func NewCrawl(options ...func(*Config)) *Crawl {
 	c := &Crawl{
 		urls:          map[string]*Url{},
 		queued:        map[string]bool{},
-		next:          make(chan string, 10000),
+		next:          make(chan string, queueBufferSize),
 		cfg:           cfg,
 		staleDuration: time.Duration(cfg.StaleDurationHours) * time.Hour,
 	}
@@ -101,14 +103,20 @@ func CandidateLinks(ls []string, candidate func(string) bool) []string {
 
 // Start initiates the crawler
 func (c *Crawl) Start(stop chan bool) error {
+	var (
+		mux fetchbot.Handler
+		t   *time.Ticker
+	)
 
-	c.stop = stop
-	mux := newMux(c, stop)
+	mux = newMux(c, stop)
+
+	if c.cfg.StopURL != "" {
+		mux = stopHandler(c.cfg.StopURL, stop, mux)
+	}
 
 	c.crawlers = make([]*fetchbot.Fetcher, c.cfg.Parallelism)
 	for i := 0; i < c.cfg.Parallelism; i++ {
 		fb := newFetchbot(i, c, mux)
-		fb.UserAgent = c.cfg.UserAgent
 		c.crawlers[i] = fb
 	}
 
@@ -116,27 +124,43 @@ func (c *Crawl) Start(stop chan bool) error {
 	qs, stopCrawling, done := c.startCrawling(c.crawlers)
 	c.queues = qs
 
-	t := time.NewTicker(time.Second * 20)
-	go func() {
-		for range t.C {
-			log.Infof("adding unfetched links from interval")
-			ufl := c.gatherUnfetchedLinks(250, true)
-			for linkurl, _ := range ufl {
-				c.next <- linkurl
+	if c.cfg.UnfetchedScanFreqMilliseconds > 0 {
+		d := time.Millisecond * time.Duration(c.cfg.UnfetchedScanFreqMilliseconds)
+		log.Infof("checking for unfetched urls every %f seconds", d.Seconds())
+		t = time.NewTicker(d)
+		go func() {
+			for range t.C {
+				if !c.stopping {
+					if len(c.next) == queueBufferSize {
+						log.Infof("next queue is full, skipping scan")
+						continue
+					}
+
+					log.Infof("scanning for unfetched links")
+					ufl := c.gatherUnfetchedLinks(250, stop)
+					for linkurl, _ := range ufl {
+						c.next <- linkurl
+					}
+					log.Infof("seeded %d unfetched links from interval", len(ufl))
+				}
 			}
-			log.Infof("seeded %d unfetched links from interval", len(ufl))
-		}
-	}()
+		}()
+	}
 
 	go func() {
 		<-stop
 
-		t.Stop()
+		if c.cfg.BackupWriteInterval > 0 {
+			path := fmt.Sprintf("%s.backup", c.cfg.DestPath)
+			log.Infof("writing backup sitemap: %s", path)
+			if err := c.writeJSON(path); err != nil {
+				log.Errorf("error writing backup sitemap: %s", err.Error())
+			}
+		}
 
-		path := fmt.Sprintf("%s.stopped", c.cfg.DestPath)
-		log.Infof("writing stop batch: %s", path)
-		if err := c.writeJSON(path); err != nil {
-			log.Errorf("error writing json batch: %s", err.Error())
+		log.Infof("%d urls remain in que for checking and processing", len(c.next))
+		if t != nil {
+			t.Stop()
 		}
 
 		stopCrawling <- true
@@ -150,9 +174,11 @@ func (c *Crawl) Start(stop chan bool) error {
 
 // startCrawling initializes the crawler, queue, stopCrawler channel, and
 // crawlingURLS slice
-func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queue, stop, done chan bool) {
-	log.Infof("starting crawl with %d crawlers", len(crawlers))
-	stop = make(chan bool)
+func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queue, stopCrawling, done chan bool) {
+	log.Infof("starting crawl with %d crawlers for %d domains", len(crawlers), len(c.domains))
+	freq := time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond
+	log.Infof("crawler request frequency: ~%f req/minute", float64(len(crawlers))/freq.Minutes())
+	stopCrawling = make(chan bool)
 	done = make(chan bool)
 	qs = make([]*fetchbot.Queue, len(crawlers))
 
@@ -161,6 +187,7 @@ func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queu
 	for i, fetcher := range crawlers {
 		// Start processing
 		qs[i] = fetcher.Start()
+		time.Sleep(time.Second)
 		wg.Add(1)
 
 		go func(i int) {
@@ -168,13 +195,12 @@ func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queu
 			log.Infof("finished crawler: %d", i)
 			wg.Done()
 		}(i)
-
-		// sleep for 2 seconds between each crawler starting
-		time.Sleep(time.Millisecond * 250)
 	}
 
 	go func() {
-		<-stop
+		<-stopCrawling
+		c.stopping = true
+		log.Info("stopping crawlers")
 		for _, q := range qs {
 			q.Close()
 		}
@@ -182,6 +208,7 @@ func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queu
 
 	go func() {
 		wg.Wait()
+		log.Info("done")
 		done <- true
 	}()
 
@@ -189,15 +216,19 @@ func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queu
 
 	links := CandidateLinks(c.cfg.Seeds, c.urlStringIsCandidate)
 	log.Infof("adding %d/%d seed urls", len(links), len(c.cfg.Seeds))
+	alreadyFetched := 0
+	childLinks := 0
 
 SEEDS:
 	for _, rawurl := range links {
 		if err := c.addUrlToQueue(qs[i], rawurl); err != nil {
 			// if the url has already been fetched, try it's links instead
 			if err == errAlreadyFetched {
+				alreadyFetched++
 				u := c.urls[rawurl]
 				for _, linkurl := range u.Links {
 					if err := c.addUrlToQueue(qs[i], linkurl); err == nil {
+						childLinks++
 						continue SEEDS
 					}
 				}
@@ -216,12 +247,9 @@ SEEDS:
 		}
 	}
 
-	// // load up next chan with unfetched links
-	// ufl := c.gatherUnfetchedLinks(250, false)
-	// log.Infof("adding %d unfetched links", len(ufl))
-	// for linkurl, _ := range ufl {
-	// 	c.next <- linkurl
-	// }
+	if alreadyFetched > 0 {
+		log.Infof("%d seed urls were already fetched. for %d of those urls, an unfetched link was used instead", alreadyFetched, childLinks)
+	}
 
 	return
 }
@@ -242,23 +270,15 @@ func (c *Crawl) addUrlToQueue(q *fetchbot.Queue, rawurl string) error {
 		return errInvalidFetchURL
 	}
 
-	// c.urlLock.Lock()
-	// defer c.urlLock.Unlock()
 	c.queLock.Lock()
 	defer c.queLock.Unlock()
 
 	normurl := canonicalURLString(u)
-	// if u := c.urls[normurl]; u != nil {
-	// 	if u.Status != 200 || (c.staleDuration != 0 && time.Since(u.Timestamp) > c.staleDuration) {
-	// 		return errAlreadyFetched
-	// 	}
-	// }
 	if c.queued[normurl] {
 		return errInQueue
 	}
 
 	c.queued[normurl] = true
-	// c.urls[normurl] = &Url{Url: normurl}
 	tg, err := NewTimedGet(normurl)
 	if err != nil {
 		return err
@@ -283,13 +303,9 @@ func (c *Crawl) seedFromNextChan(queues []*fetchbot.Queue, next chan string) {
 	}
 }
 
-func (c *Crawl) gatherUnfetchedLinks(max int, sendStop bool) map[string]bool {
-	log.Infof("LOCK - gatherUnfetchedLinks")
+func (c *Crawl) gatherUnfetchedLinks(max int, stop chan bool) map[string]bool {
 	c.urlLock.Lock()
-	defer func() {
-		log.Infof("UNLOCK - gatherUnfetchedLinks")
-		c.urlLock.Unlock()
-	}()
+	defer c.urlLock.Unlock()
 
 	links := make(map[string]bool, max)
 	i := 0
@@ -314,9 +330,9 @@ func (c *Crawl) gatherUnfetchedLinks(max int, sendStop bool) map[string]bool {
 
 	if i > 0 {
 		log.Infof("found %d unfetched links", i)
-	} else if sendStop {
+	} else if stop != nil {
 		log.Infof("no unfetched links found. sending stop")
-		c.stop <- true
+		stop <- true
 	}
 
 	return links

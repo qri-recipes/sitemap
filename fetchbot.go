@@ -8,10 +8,11 @@ import (
 	"github.com/PuerkitoBio/fetchbot"
 )
 
-func newFetchbot(id int, c *Crawl, mux *fetchbot.Mux) *fetchbot.Fetcher {
+func newFetchbot(id int, c *Crawl, mux fetchbot.Handler) *fetchbot.Fetcher {
 	f := fetchbot.New(logHandler(id, mux))
 	f.DisablePoliteness = !c.cfg.Polite
 	f.CrawlDelay = time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond
+	f.UserAgent = c.cfg.UserAgent
 	return f
 }
 
@@ -22,11 +23,9 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 
 	// Handle all errors the same
 	mux.HandleErrors(fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
-		log.Infof("LOCK - res error - %s %s - %s", ctx.Cmd.Method(), ctx.Cmd.URL(), err)
 		c.urlLock.Lock()
 		c.urls[ctx.Cmd.URL().String()] = &Url{Error: err.Error()}
 		c.urlLock.Unlock()
-		log.Infof("UNLOCK - res error - %s %s - %s", ctx.Cmd.Method(), ctx.Cmd.URL(), err)
 	}))
 
 	// Handle GET requests for html responses, to parse the body and enqueue all links as HEAD requests.
@@ -64,40 +63,49 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 
 			c.urlLock.Unlock()
 
-			go func() {
-				for _, l := range unwritten {
-					c.next <- l
-				}
-				log.Infof("seeded %d/%d links for source: %s", len(unwritten), len(u.Links), u.Url)
-			}()
+			if !c.stopping {
+				go func() {
+					for _, l := range unwritten {
+						c.next <- l
+					}
+					log.Infof("seeded %d/%d links for source: %s", len(unwritten), len(u.Links), u.Url)
+				}()
+			}
 
 			if c.finished == c.cfg.StopAfterEntries {
 				stop <- true
 			}
 
-			if c.cfg.BatchWriteInterval > 0 && (c.urlsWritten%c.cfg.BatchWriteInterval == 0) {
-				path := fmt.Sprintf("%s.backup", c.cfg.DestPath)
-				go func(path string) {
-					log.Infof("writing batch: %s", path)
+			if c.cfg.BackupWriteInterval > 0 && (c.urlsWritten%c.cfg.BackupWriteInterval == 0) {
+				go func() {
+					path := fmt.Sprintf("%s.backup", c.cfg.DestPath)
+					log.Infof("writing backup sitemap: %s", path)
 					if err := c.writeJSON(path); err != nil {
-						log.Errorf("error writing json batch: %s", err.Error())
+						log.Errorf("error writing backup sitemap: %s", err.Error())
 					}
 					c.batchCount++
-				}(path)
+				}()
 			}
 
 			go func() {
+				var rawurl string
+
 				c.queLock.Lock()
 				c.queued[u.Url] = false
-				c.queLock.Unlock()
-
 				for {
-					rawurl := <-c.next
-					if err := c.addUrlToQueue(ctx.Q, rawurl); err == nil {
-						log.Debugf("enqued %s", rawurl)
+					rawurl = <-c.next
+					if !c.queued[rawurl] && c.urlStringIsCandidate(rawurl) {
 						break
 					}
 				}
+				c.queLock.Unlock()
+
+				if err := c.addUrlToQueue(ctx.Q, rawurl); err != nil {
+					log.Infof("error queing %s", rawurl)
+					return
+				}
+
+				log.Debugf("enqued %s", rawurl)
 			}()
 		}))
 
@@ -108,7 +116,7 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 func logHandler(crawlerId int, wrapped fetchbot.Handler) fetchbot.Handler {
 	return fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
 		if err == nil {
-			log.Infof("[%d] %s %d %s - %s", res.StatusCode, ctx.Cmd.Method(), crawlerId, ctx.Cmd.URL(), res.Header.Get("Content-Type"))
+			log.Infof("[%d] %s %d %s", res.StatusCode, ctx.Cmd.Method(), crawlerId, ctx.Cmd.URL())
 		}
 		wrapped.Handle(ctx, res, err)
 	})
@@ -116,18 +124,14 @@ func logHandler(crawlerId int, wrapped fetchbot.Handler) fetchbot.Handler {
 
 // stopHandler stops the fetcher if the stopurl is reached. Otherwise it dispatches
 // the call to the wrapped Handler.
-func stopHandler(stopurl string, cancel bool, wrapped fetchbot.Handler) fetchbot.Handler {
+func stopHandler(stopurl string, stop chan bool, wrapped fetchbot.Handler) fetchbot.Handler {
 	return fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
 		if ctx.Cmd.URL().String() == stopurl {
 			log.Infof(">>>>> STOP URL %s\n", ctx.Cmd.URL())
 			// generally not a good idea to stop/block from a handler goroutine
 			// so do it in a separate goroutine
 			go func() {
-				if cancel {
-					ctx.Q.Cancel()
-				} else {
-					ctx.Q.Close()
-				}
+				stop <- true
 			}()
 			return
 		}
