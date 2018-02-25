@@ -8,11 +8,12 @@ import (
 	"github.com/PuerkitoBio/fetchbot"
 )
 
-func newFetchbot(id int, c *Crawl, mux fetchbot.Handler) *fetchbot.Fetcher {
+func newFetchbot(id int, c *Crawl, mux fetchbot.Handler, httpcli fetchbot.Doer) *fetchbot.Fetcher {
 	f := fetchbot.New(logHandler(id, mux))
 	f.DisablePoliteness = !c.cfg.Polite
 	f.CrawlDelay = time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond
 	f.UserAgent = c.cfg.UserAgent
+	f.HttpClient = httpcli
 	return f
 }
 
@@ -23,16 +24,23 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 
 	// Handle all errors the same
 	mux.HandleErrors(fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
+		log.Infof("[ERR] %s %s - %s", ctx.Cmd.Method(), ctx.Cmd.URL(), err.Error())
 		c.urlLock.Lock()
 		c.urls[ctx.Cmd.URL().String()] = &Url{Error: err.Error()}
 		c.urlLock.Unlock()
+
+		c.unqueURLs(ctx.Cmd.URL().String())
+		go c.queNextURL(ctx.Q)
 	}))
 
 	// Handle GET requests for html responses, to parse the body and enqueue all links as HEAD requests.
 	mux.Response().Method("GET").Handler(fetchbot.HandlerFunc(
 		func(ctx *fetchbot.Context, res *http.Response, err error) {
-
 			u := &Url{Url: ctx.Cmd.URL().String()}
+
+			if c.cfg.RecordRedirects {
+				u = &Url{Url: canonicalURLString(res.Request.URL)}
+			}
 
 			var st time.Time
 			if timedCmd, ok := ctx.Cmd.(*TimedCmd); ok {
@@ -63,7 +71,14 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 
 			c.urlLock.Unlock()
 
-			if !c.stopping {
+			for _, resc := range c.cfg.BackoffResponseCodes {
+				if res.StatusCode == resc {
+					log.Infof("encountered %d response. backing off", resc)
+					c.setCrawlDelay(c.crawlDelay + (time.Duration(c.cfg.CrawlDelayMilliseconds)*time.Millisecond)/2)
+				}
+			}
+
+			if !c.stopping && len(c.next) < queueBufferSize {
 				go func() {
 					for _, l := range unwritten {
 						c.next <- l
@@ -87,26 +102,9 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 				}()
 			}
 
-			go func() {
-				var rawurl string
+			c.unqueURLs(u.Url)
+			go c.queNextURL(ctx.Q)
 
-				c.queLock.Lock()
-				c.queued[u.Url] = false
-				for {
-					rawurl = <-c.next
-					if !c.queued[rawurl] && c.urlStringIsCandidate(rawurl) {
-						break
-					}
-				}
-				c.queLock.Unlock()
-
-				if err := c.addUrlToQueue(ctx.Q, rawurl); err != nil {
-					log.Infof("error queing %s", rawurl)
-					return
-				}
-
-				log.Debugf("enqued %s", rawurl)
-			}()
 		}))
 
 	return mux

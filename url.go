@@ -43,6 +43,8 @@ type Url struct {
 	Hash string `json:"hash,omitempty"`
 	// Links
 	Links []string `json:"links,omitempty"`
+	// RedirectTo speficies where this url redirects to, cannonicalized
+	RedirectTo string `json:"redirectTo,omitempty"`
 	// Error contains any fetching error string
 	Error string `json:"error,omitempty"`
 }

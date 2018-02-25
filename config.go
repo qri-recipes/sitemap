@@ -33,6 +33,8 @@ type Config struct {
 	DestPath string
 	// RecordResponseHeaders sets weather or not to keep a map of response headers
 	RecordResponseHeaders bool
+	// RecordRedirects specifies weather redirects should be recorded as redirects
+	RecordRedirects bool
 	// StaleDuration
 	StaleDurationHours int
 	// BackupWriteInterval configures how often to stop & write a backup of current progress
@@ -41,6 +43,10 @@ type Config struct {
 	// urls, checking links for unfetched urls. this "rehydrates" the crawler with urls that
 	// might be missed while avoiding duplicate fetching. default value of 0 disables the check
 	UnfetchedScanFreqMilliseconds int
+	// BackoffResponseCodes is a list of response codes that when encountered will add
+	// half the value of of CrawlDelayMilliseconds per request, slowing the crawl in response
+	// every minute
+	BackoffResponseCodes []int
 }
 
 // DefaultConfig returns the default configuration
@@ -53,6 +59,7 @@ func DefaultConfig() Config {
 		DestPath:               "sitemap.json",
 		StopAfterEntries:       5,
 		RecordResponseHeaders:  false,
+		RecordRedirects:        true,
 		Polite:                 true,
 	}
 }
