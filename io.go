@@ -19,10 +19,8 @@ func (c *Crawl) loadSitemapFile(path string) error {
 
 			added := 0
 			for urlstr, u := range urls {
-				if u.Status != 403 && u.Status != 404 {
-					c.urls[urlstr] = u
-					added++
-				}
+				c.urls[urlstr] = u
+				added++
 			}
 			log.Info("********************")
 			log.Infof("added: %d prior urls", added)

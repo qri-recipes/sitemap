@@ -68,6 +68,7 @@ func NewCrawl(options ...func(*Config)) *Crawl {
 		queued:        map[string]bool{},
 		next:          make(chan string, queueBufferSize),
 		cfg:           cfg,
+		crawlDelay:    time.Duration(cfg.CrawlDelayMilliseconds) * time.Millisecond,
 		staleDuration: time.Duration(cfg.StaleDurationHours) * time.Hour,
 	}
 
@@ -202,7 +203,7 @@ func (c *Crawl) setCrawlDelay(d time.Duration) {
 	for _, c := range c.crawlers {
 		c.CrawlDelay = d
 	}
-	log.Infof("crawl delay is now: %d seconds", c.crawlDelay.Seconds())
+	log.Infof("crawler delay is now: %f seconds", c.crawlDelay.Seconds())
 	log.Infof("crawler request frequency: ~%f req/minute", float64(len(c.crawlers))/c.crawlDelay.Minutes())
 }
 

@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/fetchbot"
 )
 
 func newFetchbot(id int, c *Crawl, mux fetchbot.Handler, httpcli fetchbot.Doer) *fetchbot.Fetcher {
-	f := fetchbot.New(logHandler(id, mux))
+	// f := fetchbot.New(logHandler(id, mux))
+	f := fetchbot.New(mux)
 	f.DisablePoliteness = !c.cfg.Polite
 	f.CrawlDelay = time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond
 	f.UserAgent = c.cfg.UserAgent
@@ -24,10 +26,12 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 
 	// Handle all errors the same
 	mux.HandleErrors(fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
-		log.Infof("[ERR] %s %s - %s", ctx.Cmd.Method(), ctx.Cmd.URL(), err.Error())
-		c.urlLock.Lock()
-		c.urls[ctx.Cmd.URL().String()] = &Url{Error: err.Error()}
-		c.urlLock.Unlock()
+		if !strings.Contains(err.Error(), errAlreadyFetched.Error()) {
+			log.Infof("[ERR] %s %s - %s", ctx.Cmd.Method(), ctx.Cmd.URL(), err.Error())
+			c.urlLock.Lock()
+			c.urls[ctx.Cmd.URL().String()] = &Url{Error: err.Error()}
+			c.urlLock.Unlock()
+		}
 
 		c.unqueURLs(ctx.Cmd.URL().String())
 		go c.queNextURL(ctx.Q)
@@ -36,11 +40,14 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 	// Handle GET requests for html responses, to parse the body and enqueue all links as HEAD requests.
 	mux.Response().Method("GET").Handler(fetchbot.HandlerFunc(
 		func(ctx *fetchbot.Context, res *http.Response, err error) {
+
 			u := &Url{Url: ctx.Cmd.URL().String()}
 
 			if c.cfg.RecordRedirects {
 				u = &Url{Url: canonicalURLString(res.Request.URL)}
 			}
+
+			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), u.Url)
 
 			var st time.Time
 			if timedCmd, ok := ctx.Cmd.(*TimedCmd); ok {
@@ -74,7 +81,7 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 			for _, resc := range c.cfg.BackoffResponseCodes {
 				if res.StatusCode == resc {
 					log.Infof("encountered %d response. backing off", resc)
-					c.setCrawlDelay(c.crawlDelay + (time.Duration(c.cfg.CrawlDelayMilliseconds)*time.Millisecond)/2)
+					c.setCrawlDelay(c.crawlDelay + ((time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond) / 2))
 				}
 			}
 
@@ -111,14 +118,14 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 }
 
 // logHandler prints the fetch information and dispatches the call to the wrapped Handler.
-func logHandler(crawlerId int, wrapped fetchbot.Handler) fetchbot.Handler {
-	return fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
-		if err == nil {
-			log.Infof("[%d] %s %d %s", res.StatusCode, ctx.Cmd.Method(), crawlerId, ctx.Cmd.URL())
-		}
-		wrapped.Handle(ctx, res, err)
-	})
-}
+// func logHandler(crawlerId int, wrapped fetchbot.Handler) fetchbot.Handler {
+// 	return fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
+// 		if err == nil {
+// 			log.Infof("[%d] %s %d %s", res.StatusCode, ctx.Cmd.Method(), crawlerId, ctx.Cmd.URL())
+// 		}
+// 		wrapped.Handle(ctx, res, err)
+// 	})
+// }
 
 // stopHandler stops the fetcher if the stopurl is reached. Otherwise it dispatches
 // the call to the wrapped Handler.

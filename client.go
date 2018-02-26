@@ -14,16 +14,18 @@ func newClient(c *Crawl) *http.Client {
 
 	return &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			prev := via[len(via)-1]
 
+			prev := via[len(via)-1]
 			prevurl := canonicalURLString(prev.URL)
 
 			r, _ := url.Parse(req.URL.String())
 			canurlstr := canonicalURLString(r)
 
+			c.urlLock.Lock()
+			defer c.urlLock.Unlock()
+
 			if prevurl != canurlstr {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)
-				c.urlLock.Lock()
 				c.urls[prevurl] = &Url{
 					Url:        prevurl,
 					Timestamp:  time.Now(),
@@ -32,13 +34,13 @@ func newClient(c *Crawl) *http.Client {
 				}
 				c.finished++
 				c.urlsWritten++
-				c.urlLock.Unlock()
+			}
+
+			if c.urls[canurlstr] != nil {
+				return errAlreadyFetched
 			}
 
 			if len(via) >= 10 {
-				for i, c := range via {
-					log.Infof("%d %#v", i, c.URL.String())
-				}
 				return fmt.Errorf("stopped after 10 redirects")
 			}
 			return nil
