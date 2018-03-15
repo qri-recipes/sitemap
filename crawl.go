@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,10 @@ type Crawl struct {
 	urlLock sync.Mutex
 	// crawled is the list of stuff that's been crawled
 	urls map[string]*Url
+
+	// urls is a map of normalizedUrl : http response code
+	// to keep track of url's we've seen
+	// urls *sync.Map
 
 	// crawlers is a slice of all the executing crawlers
 	crawlers []*fetchbot.Fetcher
@@ -356,6 +361,12 @@ func (c *Crawl) gatherUnfetchedLinks(max int, stop chan bool) map[string]bool {
 // urlStringIsCandidate scans the slice of crawlingURLS to see if we should GET
 // the passed-in url
 func (c *Crawl) urlStringIsCandidate(rawurl string) bool {
+	for _, ignore := range c.cfg.IgnorePatterns {
+		if strings.Contains(rawurl, ignore) {
+			return false
+		}
+	}
+
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return false

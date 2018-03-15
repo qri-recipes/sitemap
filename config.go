@@ -11,11 +11,13 @@ type Config struct {
 	// UserAgent is the string identifiers for crawler requests
 	UserAgent string
 	// Domains is the list of domains to crawl. Only domains listed
-	// in the
+	// in this list will be crawled
 	Domains []string
 	// Seeds is a list of urls to seed the crawler with
 	Seeds []string
-	// Parallelism
+	// Ignore is a list of url patterns to ignore
+	IgnorePatterns []string
+	// Parallelism the number of urls to be fetching simultaneously
 	Parallelism int
 	// CrawlDelayMilliseconds determines how long to wait between fetches
 	// for a given crawler

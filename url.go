@@ -106,20 +106,6 @@ func (u *Url) HandleGetResponse(started time.Time, res *http.Response, recordHea
 	return
 }
 
-func (u Url) CDXJMeta() map[string]interface{} {
-	return map[string]interface{}{
-		"status":          u.Status,
-		"contentLength":   u.ContentLength,
-		"contentType":     u.ContentType,
-		"contentSniff":    u.ContentSniff,
-		"headers":         u.Headers,
-		"hash":            u.Hash,
-		"requestDuration": u.RequestDuration,
-		// "headers":         u.Headers,
-		"links": u.Links,
-	}
-}
-
 func canonicalURLString(u *url.URL) string {
 	return purell.NormalizeURL(u, purell.FlagsUnsafeGreedy)
 }
