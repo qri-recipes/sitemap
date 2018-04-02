@@ -1,4 +1,4 @@
-package main
+package sitemap
 
 import (
 	"fmt"
@@ -44,7 +44,7 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 			u := &Url{Url: ctx.Cmd.URL().String()}
 
 			if c.cfg.RecordRedirects {
-				u = &Url{Url: canonicalURLString(res.Request.URL)}
+				u = &Url{Url: NormalizeURLString(res.Request.URL)}
 			}
 
 			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), u.Url)
@@ -102,7 +102,7 @@ func newMux(c *Crawl, stop chan bool) *fetchbot.Mux {
 				go func() {
 					path := fmt.Sprintf("%s.backup", c.cfg.DestPath)
 					log.Infof("writing backup sitemap: %s", path)
-					if err := c.writeJSON(path); err != nil {
+					if err := c.WriteJSON(path); err != nil {
 						log.Errorf("error writing backup sitemap: %s", err.Error())
 					}
 					c.batchCount++

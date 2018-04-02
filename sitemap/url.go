@@ -1,4 +1,4 @@
-package main
+package sitemap
 
 import (
 	"bytes"
@@ -106,7 +106,7 @@ func (u *Url) HandleGetResponse(started time.Time, res *http.Response, recordHea
 	return
 }
 
-func canonicalURLString(u *url.URL) string {
+func NormalizeURLString(u *url.URL) string {
 	return purell.NormalizeURL(u, purell.FlagsUnsafeGreedy)
 }
 
@@ -137,7 +137,7 @@ func (u *Url) ExtractDocLinks(doc *goquery.Document) error {
 			return
 		}
 
-		str := canonicalURLString(address)
+		str := NormalizeURLString(address)
 		// deduplicate links
 		for _, l := range u.Links {
 			if str == l {

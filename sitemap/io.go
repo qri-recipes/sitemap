@@ -1,4 +1,4 @@
-package main
+package sitemap
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func (c *Crawl) loadSitemapFile(path string) error {
+func (c *Crawl) LoadSitemapFile(path string) error {
 	if filepath.Ext(path) == ".json" {
 		if f, err := os.Open(path); err == nil {
 			log.Infof("loading previous sitemap: %s", path)
@@ -30,7 +30,11 @@ func (c *Crawl) loadSitemapFile(path string) error {
 	return nil
 }
 
-func (c *Crawl) writeJSON(path string) error {
+func (c *Crawl) WriteJSON(path string) error {
+	if path == "" {
+		path = c.cfg.DestPath
+	}
+
 	log.Infof("writing json index file to path: %s", path)
 
 	c.urlLock.Lock()

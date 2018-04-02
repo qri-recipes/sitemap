@@ -1,4 +1,4 @@
-package main
+package sitemap
 
 import (
 	"flag"
@@ -34,7 +34,7 @@ func main() {
 		log.Errorf("crawl failed: %s", err.Error())
 	}
 
-	if err := crawl.writeJSON(crawl.cfg.DestPath); err != nil {
+	if err := crawl.WriteJSON(crawl.cfg.DestPath); err != nil {
 		log.Errorf("error writing file: %S", err.Error())
 	}
 

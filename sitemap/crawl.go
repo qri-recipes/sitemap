@@ -1,4 +1,4 @@
-package main
+package sitemap
 
 import (
 	"fmt"
@@ -77,7 +77,7 @@ func NewCrawl(options ...func(*Config)) *Crawl {
 		staleDuration: time.Duration(cfg.StaleDurationHours) * time.Hour,
 	}
 
-	c.loadSitemapFile(c.cfg.SrcPath)
+	c.LoadSitemapFile(c.cfg.SrcPath)
 
 	c.domains = make([]*url.URL, len(cfg.Domains))
 	for i, rawurl := range cfg.Domains {
@@ -175,7 +175,7 @@ func (c *Crawl) Start(stop chan bool) error {
 		if c.cfg.BackupWriteInterval > 0 {
 			path := fmt.Sprintf("%s.backup", c.cfg.DestPath)
 			log.Infof("writing backup sitemap: %s", path)
-			if err := c.writeJSON(path); err != nil {
+			if err := c.WriteJSON(path); err != nil {
 				log.Errorf("error writing backup sitemap: %s", err.Error())
 			}
 		}
@@ -255,7 +255,11 @@ func (c *Crawl) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queu
 	seeds := CandidateLinks(c.cfg.Seeds, c.urlStringIsCandidate)
 	log.Infof("adding %d/%d seed urls", len(seeds), len(c.cfg.Seeds))
 
-	for _, s := range seeds {
+	for i, s := range seeds {
+		if i < len(qs) {
+			c.addURLToQue(qs[i], s)
+			continue
+		}
 		c.next <- s
 	}
 	return
@@ -296,7 +300,7 @@ func (c *Crawl) addURLToQue(q *fetchbot.Queue, rawurl string) error {
 		return errInvalidFetchURL
 	}
 
-	normurl := canonicalURLString(u)
+	normurl := NormalizeURLString(u)
 
 	c.urlLock.Lock()
 	if c.urls[normurl] != nil {

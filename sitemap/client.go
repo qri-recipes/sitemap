@@ -1,4 +1,4 @@
-package main
+package sitemap
 
 import (
 	"fmt"
@@ -16,10 +16,10 @@ func newClient(c *Crawl) *http.Client {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 
 			prev := via[len(via)-1]
-			prevurl := canonicalURLString(prev.URL)
+			prevurl := NormalizeURLString(prev.URL)
 
 			r, _ := url.Parse(req.URL.String())
-			canurlstr := canonicalURLString(r)
+			canurlstr := NormalizeURLString(r)
 
 			c.urlLock.Lock()
 			defer c.urlLock.Unlock()
