@@ -26,7 +26,7 @@ func init() {
 	RootCmd.AddCommand(
 		CleanCmd,
 		CrawlCmd,
-		LinksToCmd,
+		InboundLinksCmd,
 		NormalizeUrlCmd,
 		StatsCmd,
 		UnfetchedUrlsCmd,

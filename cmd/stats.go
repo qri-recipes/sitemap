@@ -29,8 +29,10 @@ type Stats struct {
 var StatsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "calculate stats on a sitemap",
+	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		path := "sitemap.json"
+		// path := "sitemap.json"
+		path := args[0]
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
 			fmt.Printf("error reading sitemap file %s: %s", path, err.Error())
