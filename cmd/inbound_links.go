@@ -12,8 +12,11 @@ import (
 
 var InboundLinksCmd = &cobra.Command{
 	Use:   "inbound-links",
-	Short: "list links to a given url",
-	Args:  cobra.ExactArgs(2),
+	Short: "output links to a given url to a file",
+	Example: `  write all urls in "sitemap.json" that link to http://example.com:
+  $ sitemap inbound-links sitemap.json http://example.com`,
+
+	Args: cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		var (
 			u   *url.URL
@@ -22,6 +25,12 @@ var InboundLinksCmd = &cobra.Command{
 
 		path := args[0]
 		rawurl := args[1]
+		writepath, err := cmd.Flags().GetString("output")
+		if err != nil {
+			fmt.Printf("error getting flag: %s\n", err.Error())
+			return
+		}
+
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
 			fmt.Printf("error reading sitemap file %s: %s", path, err.Error())
@@ -56,7 +65,7 @@ var InboundLinksCmd = &cobra.Command{
 			}
 		}
 
-		linkdata, err := json.Marshal(inbound)
+		linkdata, err := json.MarshalIndent(inbound, "", "  ")
 		if err != nil {
 			fmt.Printf("error encoding links list to json: %s\n", err.Error())
 			return
@@ -67,6 +76,11 @@ var InboundLinksCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("found %d/%d inbound links for %s", found, checked, rawurl)
+		fmt.Printf("found %d/%d inbound links for %s\n", found, checked, rawurl)
+		fmt.Printf("links written to %s\n", writepath)
 	},
+}
+
+func init() {
+	InboundLinksCmd.Flags().StringP("output", "o", "inbound_links.json", "path to write file to")
 }

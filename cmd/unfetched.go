@@ -9,26 +9,24 @@ import (
 	"path/filepath"
 
 	"github.com/datatogether/ffi"
+	"github.com/qri-recipes/sitemap/sitemap"
 	"github.com/spf13/cobra"
 )
 
 var unfetchedFilePath = "unfetched.txt"
 
-type Url struct {
-	Url   string
-	Links []string
-}
-
 var UnfetchedUrlsCmd = &cobra.Command{
 	Use:   "unfetched",
 	Short: "list sitemap destination links that haven't been fetched",
+	Args:  cobra.MinimumNArgs(1),
+
 	Run: func(cmd *cobra.Command, args []string) {
-		data, err := ioutil.ReadFile("sitemap.json")
+		data, err := ioutil.ReadFile(args[0])
 		if err != nil {
 			panic(err.Error())
 		}
 
-		urls := map[string]Url{}
+		urls := map[string]*sitemap.Url{}
 		if err := json.Unmarshal(data, &urls); err != nil {
 			panic(err.Error())
 		}
