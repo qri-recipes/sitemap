@@ -13,14 +13,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var unfetchedFilePath = "unfetched.txt"
-
 var UnfetchedUrlsCmd = &cobra.Command{
 	Use:   "unfetched",
 	Short: "list sitemap destination links that haven't been fetched",
-	Args:  cobra.MinimumNArgs(1),
+	Long: `'sitemap crawl' currently misses a few links during it's process, this
+command delivers a list of urls that *haven't* been fetched yet. Use unfetched
+to ensure there's a record for every link (it should report 0 when the map is
+as complete as can be), and add missing links to Seeds in configuration`,
+	Args: cobra.MinimumNArgs(1),
 
 	Run: func(cmd *cobra.Command, args []string) {
+		format, err := cmd.Flags().GetString("format")
+		if err != nil {
+			panic(err.Error())
+		}
+		cfgPath, err := cmd.Flags().GetString("config")
+		if err != nil {
+			panic(err.Error())
+		}
+		outputPath, err := cmd.Flags().GetString("output")
+		if err != nil {
+			panic(err.Error())
+		}
+		outputPath = fmt.Sprintf("%s.%s", outputPath, format)
+
+		cfg := &sitemap.Config{}
+		sitemap.JSONConfigFromFilepath(cfgPath)(cfg)
+		hosts := make([]*url.URL, len(cfg.Domains))
+		for i, domain := range cfg.Domains {
+			u, err := url.Parse(domain)
+			if err != nil {
+				panic(err.Error())
+			}
+			hosts[i] = u
+		}
+
 		data, err := ioutil.ReadFile(args[0])
 		if err != nil {
 			panic(err.Error())
@@ -31,14 +58,19 @@ var UnfetchedUrlsCmd = &cobra.Command{
 			panic(err.Error())
 		}
 
-		f, err := os.OpenFile(unfetchedFilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			panic(err)
+		}
+
+		if format == "json" {
+			f.Write([]byte{'['})
 		}
 
 		unfetched := 0
 		checked := 0
 		for _, u := range urls {
+		LINKS:
 			for _, l := range u.Links {
 				checked++
 				link, err := url.Parse(l)
@@ -46,25 +78,47 @@ var UnfetchedUrlsCmd = &cobra.Command{
 					panic("error parsing url: " + err.Error())
 				}
 
-				if link.Host != "epa.gov" {
-					continue
+				for _, d := range hosts {
+					if link.Host != d.Host {
+						continue LINKS
+					}
 				}
 
 				if err := isWebpageURL(link); err == nil {
 					if _, ok := urls[l]; !ok {
-						unfetched++
-						if _, err := f.Write(append([]byte(l), '\n')); err != nil {
+						var data []byte
+						switch format {
+						case "txt":
+							data = append([]byte(l), '\n')
+						case "json":
+							if unfetched == 0 {
+								data = []byte(fmt.Sprintf("\n  \"%s\"", l))
+							} else {
+								data = []byte(fmt.Sprintf(",\n  \"%s\"", l))
+							}
+						}
+						if _, err := f.Write(data); err != nil {
 							panic(err)
 						}
+						unfetched++
 					}
 				}
 
 			}
 		}
+		if format == "json" {
+			f.Write([]byte{'\n', ']'})
+		}
 		f.Close()
 
-		fmt.Printf(`wrote %d/%d unfetched links to %s`, unfetched, checked, unfetchedFilePath)
+		fmt.Printf("wrote %d/%d unfetched links to %s\n", unfetched, checked, outputPath)
 	},
+}
+
+func init() {
+	UnfetchedUrlsCmd.Flags().StringP("config", "c", "sitemap.config.json", "path to configuration json file")
+	UnfetchedUrlsCmd.Flags().StringP("output", "o", "unfetched", "path to output without extension")
+	UnfetchedUrlsCmd.Flags().StringP("format", "f", "json", "output format. one of [txt,json]")
 }
 
 var htmlMimeTypes = map[string]bool{

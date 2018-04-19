@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
+// logger
+var log = logrus.New()
+
 var RootCmd = &cobra.Command{
 	Short: "CLI tool for building sitemaps",
-	// Run: func(cmd *cobra.Command, args []string) {
-	// },
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.

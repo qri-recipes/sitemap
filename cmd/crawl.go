@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,26 +8,21 @@ import (
 	"syscall"
 
 	"github.com/qri-recipes/sitemap/sitemap"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 var (
-	// logger
-	log       = logrus.New()
-	cfgPath   = "sitemap.config.json"
 	sigKilled bool
 )
-
-func init() {
-	// flag.StringVar(&cfgPath, "config", "sitemap.config.json", "path to JSON configuration file")
-}
 
 var CrawlCmd = &cobra.Command{
 	Use:   "crawl",
 	Short: "generate a sitemap by crawling",
 	Run: func(cmd *cobra.Command, args []string) {
-		flag.Parse()
+		cfgPath, err := cmd.Flags().GetString("config")
+		if err != nil {
+			fmt.Printf("error getting config: %s", err.Error())
+		}
 
 		crawl := sitemap.NewCrawl(sitemap.JSONConfigFromFilepath(cfgPath))
 
@@ -40,11 +34,15 @@ var CrawlCmd = &cobra.Command{
 		}
 
 		if err := crawl.WriteJSON(""); err != nil {
-			fmt.Printf("error writing file: %S", err.Error())
+			fmt.Printf("error writing file: %s", err.Error())
 		}
 
 		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
+}
+
+func init() {
+	CrawlCmd.Flags().StringP("config", "c", "sitemap.config.json", "path to configuration json file")
 }
 
 func stopOnSigKill(stop chan bool) {
